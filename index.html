@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0d2230">
+<title>Bloque Tico</title>
+<link rel="manifest" href="manifest.json">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <div class="brand"><div>Bloque<span>Tico</span></div><small id="modeLabel">Clásico</small></div>
+    <div class="right">
+      <div class="chip" id="bestChip" title="Récord"><svg class="crown" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7l4.5 4L12 4l4.5 7L21 7l-2 12H5L3 7z"/></svg><span id="best">0</span></div>
+      <button class="round" id="pauseBtn" type="button" aria-label="Pausa"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg></button>
+    </div>
+  </header>
+  <div class="scorebox">
+    <span class="score-label">Puntos</span><span class="score" id="score">0</span>
+    <div class="goal" id="goal" hidden><div class="bar"><i id="goalBar"></i></div><span id="goalText">Meta: 1000</span></div>
+  </div>
+  <div class="board-wrap" id="boardWrap">
+    <div class="board" id="board"></div>
+    <canvas class="sparks" id="sparks"></canvas>
+    <div class="fx" id="fx"></div>
+  </div>
+  <div class="hint" id="hint"></div>
+  <div class="tray" id="tray">
+    <div class="slot" data-i="0"></div><div class="slot" data-i="1"></div><div class="slot" data-i="2"></div>
+  </div>
+</div>
+
+<!-- Inicio -->
+<div class="overlay home" id="home">
+  <div class="home-inner">
+    <div class="home-top">
+      <div class="chip" title="Días seguidos jugando"><svg class="flame" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2c1 4 5 6 5 11a5 5 0 0 1-10 0c0-2 1-3.5 2-4.5 0 2 1 3 2 3 0-3-1-6 1-9.5z"/></svg><span id="homeStreak">0 días</span></div>
+      <div class="chip" title="Monedas"><span class="coin"></span><span id="homeCoins">0</span></div>
+    </div>
+    <div class="logo" id="logo" aria-hidden="true"></div>
+    <h1>Bloque<span>Tico</span></h1>
+    <div class="homebest"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7l4.5 4L12 4l4.5 7L21 7l-2 12H5L3 7z"/></svg>Récord: <span id="homeBest">0</span></div>
+    <div class="btns">
+      <button class="btn primary" id="playBtn" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg><span id="playLabel">Jugar</span></button>
+      <button class="btn ghosty" id="newBtn" type="button" hidden>Partida nueva</button>
+      <button class="daily-card" id="dailyBtn" type="button">
+        <div class="row"><b>Reto diario</b><span class="status" id="dailyStatus">Meta: 1000 puntos</span></div>
+        <div class="week" id="week"></div>
+      </button>
+      <button class="btn ghosty" id="themesBtn" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"/></svg>Estilos de bloques y tablero</button>
+    </div>
+    <div class="toggles">
+      <button class="tgl" type="button" data-toggle="sound" aria-pressed="true">Sonido <span class="dot"></span></button>
+      <button class="tgl" type="button" data-toggle="music" aria-pressed="true">Música <span class="dot"></span></button>
+    </div>
+  </div>
+</div>
+
+<!-- Recompensa diaria -->
+<div class="overlay" id="reward" hidden>
+  <div class="panel">
+    <h2>Recompensa diaria</h2>
+    <div class="streak-line"><svg class="flame" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2c1 4 5 6 5 11a5 5 0 0 1-10 0c0-2 1-3.5 2-4.5 0 2 1 3 2 3 0-3-1-6 1-9.5z"/></svg><span id="rewardStreak">Día 1</span></div>
+    <div class="days" id="days"></div>
+    <p id="rewardNote">Vuelve mañana para mantener tu racha y ganar más.</p>
+    <button class="btn primary" id="claimAdBtn" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg><span id="claimAdLabel">Ver anuncio y duplicar</span></button>
+    <button class="btn ghosty" id="claimBtn" type="button">Reclamar</button>
+  </div>
+</div>
+
+<!-- Temas -->
+<div class="overlay" id="themes" hidden>
+  <div class="panel">
+    <h2>Estilos</h2>
+    <div class="earned"><span class="coin"></span><span id="themeCoins">0</span></div>
+    <div class="tabs" role="tablist">
+      <button class="tab" type="button" role="tab" id="tabBlocks" aria-selected="true">Bloques</button>
+      <button class="tab" type="button" role="tab" id="tabBoards" aria-selected="false">Tablero</button>
+    </div>
+    <div class="theme-list" id="themeList"></div>
+    <button class="btn primary" id="coinAdBtn" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>Ver anuncio: +25 monedas</button>
+    <button class="btn ghosty" id="themesClose" type="button">Listo</button>
+    <p class="note">Ganas monedas jugando: 1 por cada 100 puntos, más la recompensa diaria y el reto.</p>
+  </div>
+</div>
+
+<!-- Pausa -->
+<div class="overlay" id="pause" hidden>
+  <div class="panel">
+    <h2>Pausa</h2>
+    <div class="toggles">
+      <button class="tgl" type="button" data-toggle="sound" aria-pressed="true">Sonido <span class="dot"></span></button>
+      <button class="tgl" type="button" data-toggle="music" aria-pressed="true">Música <span class="dot"></span></button>
+    </div>
+    <button class="btn primary" id="resumeBtn" type="button">Continuar</button>
+    <button class="btn ghosty" id="restartBtn" type="button">Reiniciar partida</button>
+    <button class="btn ghosty" id="menuBtn" type="button">Menú principal</button>
+  </div>
+</div>
+
+<!-- Fin de partida -->
+<div class="overlay" id="over" hidden>
+  <div class="panel">
+    <h2 id="overTitle">¡Sin espacio!</h2>
+    <div class="big" id="overScore">0</div>
+    <p id="overBest">Récord: 0</p>
+    <div class="earned" id="overCoins" hidden><span class="coin"></span><span id="overCoinsN">+0</span></div>
+    <button class="btn primary" id="continueBtn" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>Ver anuncio y seguir</button>
+    <button class="btn ghosty" id="againBtn" type="button">Jugar de nuevo</button>
+    <button class="btn ghosty" id="overMenuBtn" type="button">Menú principal</button>
+    <p class="note">Prototipo: los anuncios son simulados. En la app real van anuncios con recompensa de AdMob.</p>
+  </div>
+</div>
+
+<!-- Reto cumplido -->
+<div class="overlay" id="win" hidden>
+  <div class="panel">
+    <h2>¡Reto cumplido!</h2>
+    <p id="winText">Llegaste a la meta de hoy.</p>
+    <div class="earned"><span class="coin"></span>+50</div>
+    <button class="btn green" id="winKeep" type="button">Seguir jugando</button>
+    <button class="btn ghosty" id="winMenu" type="button">Menú principal</button>
+  </div>
+</div>
+
+<!-- Anuncio simulado -->
+<div class="overlay" id="adLayer" hidden>
+  <div class="ad">
+    <span class="tag">Anuncio con recompensa · simulado</span>
+    <div class="count" id="adCount">5</div>
+    <p id="adMsg">Tu recompensa</p>
+  </div>
+</div>
+
+<script src="script.js"></script>
+</body>
+</html>
