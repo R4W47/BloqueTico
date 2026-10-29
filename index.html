@@ -13,7 +13,7 @@
   <header class="top">
     <div class="brand"><div>Bloque<span>Tico</span></div><small id="modeLabel">Clásico</small></div>
     <div class="right">
-      <div class="chip" id="bestChip" title="Récord"><svg class="crown" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7l4.5 4L12 4l4.5 7L21 7l-2 12H5L3 7z"/></svg><span id="best">0</span></div>
+      <div class="chip" id="bestChip" title="Récord"><svg class="crown" id="chipIcon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7l4.5 4L12 4l4.5 7L21 7l-2 12H5L3 7z"/></svg><span id="best">0</span></div>
       <button class="round" id="pauseBtn" type="button" aria-label="Pausa"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg></button>
     </div>
   </header>
@@ -27,6 +27,11 @@
     <div class="fx" id="fx"></div>
   </div>
   <div class="hint" id="hint"></div>
+  <div class="powers" id="powers">
+    <button class="pw" type="button" data-pw="hammer" aria-label="Martillo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13.8 3.2l7 7-2.1 2.1-1.4-1.4-2.8 2.8-2.8-2.8 2.8-2.8-1.4-1.4zM9.6 11.7l2.8 2.8-7.8 7.8a2 2 0 0 1-2.8-2.8z"/></svg>Martillo<span class="n">0</span></button>
+    <button class="pw" type="button" data-pw="swap" aria-label="Cambiar piezas"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7h10V4l4 4-4 4V9H7zM17 17H7v3l-4-4 4-4v3h10z"/></svg>Cambiar<span class="n">0</span></button>
+    <button class="pw" type="button" data-pw="bomb" aria-label="Bomba"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 8a7 7 0 1 0 6 3.4l1.2-1.2-1.4-1.4-1.2 1.2A7 7 0 0 0 10 8zM17 3l1 2 2 1-2 1-1 2-1-2-2-1 2-1z"/></svg>Bomba<span class="n">0</span></button>
+  </div>
   <div class="tray" id="tray">
     <div class="slot" data-i="0"></div><div class="slot" data-i="1"></div><div class="slot" data-i="2"></div>
   </div>
@@ -45,16 +50,62 @@
     <div class="btns">
       <button class="btn primary" id="playBtn" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg><span id="playLabel">Jugar</span></button>
       <button class="btn ghosty" id="newBtn" type="button" hidden>Partida nueva</button>
+      <button class="btn tile" id="advBtn" type="button"><span>Aventura</span><small id="advLabel">Nivel 1</small></button>
       <button class="daily-card" id="dailyBtn" type="button">
         <div class="row"><b>Reto diario</b><span class="status" id="dailyStatus">Meta: 1000 puntos</span></div>
         <div class="week" id="week"></div>
       </button>
-      <button class="btn ghosty" id="themesBtn" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"/></svg>Estilos de bloques y tablero</button>
+      <div class="card" id="missions">
+        <div class="row"><b>Misiones de hoy</b><span id="misCount">0/3</span></div>
+        <div id="misList" style="display:flex; flex-direction:column; gap:10px"></div>
+        <button class="btn green" id="misBonus" type="button" hidden><span class="coin"></span>Bonus por las 3: +50</button>
+      </div>
+      <div class="row2">
+        <button class="btn tile" id="themesBtn" type="button"><span>Estilos</span><small>Bloques y tablero</small></button>
+        <button class="btn tile" id="achBtn" type="button"><span>Logros</span><small>y estadísticas</small><i class="badge" id="achBadge" hidden></i></button>
+      </div>
     </div>
     <div class="toggles">
       <button class="tgl" type="button" data-toggle="sound" aria-pressed="true">Sonido <span class="dot"></span></button>
       <button class="tgl" type="button" data-toggle="music" aria-pressed="true">Música <span class="dot"></span></button>
+      <button class="tgl" type="button" data-toggle="vibra" aria-pressed="true">Vibración <span class="dot"></span></button>
     </div>
+  </div>
+</div>
+
+<!-- Aventura -->
+<div class="overlay" id="adv" hidden>
+  <div class="panel">
+    <h2>Aventura</h2>
+    <p>Cada nivel tiene una meta y un número limitado de piezas.</p>
+    <div class="levels" id="levels"></div>
+    <button class="btn ghosty" id="advClose" type="button">Volver</button>
+  </div>
+</div>
+
+<!-- Logros y estadísticas -->
+<div class="overlay" id="ach" hidden>
+  <div class="panel">
+    <h2>Logros</h2>
+    <div class="tabs" role="tablist">
+      <button class="tab" type="button" role="tab" id="tabAch" aria-selected="true">Logros</button>
+      <button class="tab" type="button" role="tab" id="tabStats" aria-selected="false">Estadísticas</button>
+    </div>
+    <div class="scroll" id="achList"></div>
+    <button class="btn ghosty" id="achClose" type="button">Listo</button>
+  </div>
+</div>
+
+<!-- Comprar power-up -->
+<div class="overlay" id="buy" hidden>
+  <div class="panel">
+    <div class="pw-desc" id="buyIcon"></div>
+    <h2 id="buyTitle">Martillo</h2>
+    <p id="buyDesc">Rompe un bloque del tablero.</p>
+    <p>Tienes <b id="buyHave">0</b> · Monedas: <b id="buyCoins">0</b></p>
+    <button class="btn primary" id="buyAd" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>Ver anuncio: +1</button>
+    <button class="btn ghosty" id="buyCoinsBtn" type="button"><span class="coin"></span><span id="buyPrice">Comprar 1 por 60</span></button>
+    <button class="btn ghosty" id="buyClose" type="button">Cerrar</button>
   </div>
 </div>
 
@@ -70,7 +121,7 @@
   </div>
 </div>
 
-<!-- Temas -->
+<!-- Estilos -->
 <div class="overlay" id="themes" hidden>
   <div class="panel">
     <h2>Estilos</h2>
@@ -82,7 +133,7 @@
     <div class="theme-list" id="themeList"></div>
     <button class="btn primary" id="coinAdBtn" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>Ver anuncio: +25 monedas</button>
     <button class="btn ghosty" id="themesClose" type="button">Listo</button>
-    <p class="note">Ganas monedas jugando: 1 por cada 100 puntos, más la recompensa diaria y el reto.</p>
+    <p class="note">Ganas monedas jugando: 1 por cada 100 puntos, más la recompensa diaria, misiones, logros, retos y niveles.</p>
   </div>
 </div>
 
@@ -93,6 +144,7 @@
     <div class="toggles">
       <button class="tgl" type="button" data-toggle="sound" aria-pressed="true">Sonido <span class="dot"></span></button>
       <button class="tgl" type="button" data-toggle="music" aria-pressed="true">Música <span class="dot"></span></button>
+      <button class="tgl" type="button" data-toggle="vibra" aria-pressed="true">Vibración <span class="dot"></span></button>
     </div>
     <button class="btn primary" id="resumeBtn" type="button">Continuar</button>
     <button class="btn ghosty" id="restartBtn" type="button">Reiniciar partida</button>
@@ -107,19 +159,20 @@
     <div class="big" id="overScore">0</div>
     <p id="overBest">Récord: 0</p>
     <div class="earned" id="overCoins" hidden><span class="coin"></span><span id="overCoinsN">+0</span></div>
-    <button class="btn primary" id="continueBtn" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>Ver anuncio y seguir</button>
+    <button class="btn primary" id="continueBtn" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg><span id="continueLabel">Ver anuncio y seguir</span></button>
+    <button class="btn green" id="usePwBtn" type="button">Usar un power-up</button>
     <button class="btn ghosty" id="againBtn" type="button">Jugar de nuevo</button>
     <button class="btn ghosty" id="overMenuBtn" type="button">Menú principal</button>
     <p class="note">Prototipo: los anuncios son simulados. En la app real van anuncios con recompensa de AdMob.</p>
   </div>
 </div>
 
-<!-- Reto cumplido -->
+<!-- Reto cumplido / Nivel superado -->
 <div class="overlay" id="win" hidden>
   <div class="panel">
-    <h2>¡Reto cumplido!</h2>
+    <h2 id="winTitle">¡Reto cumplido!</h2>
     <p id="winText">Llegaste a la meta de hoy.</p>
-    <div class="earned"><span class="coin"></span>+50</div>
+    <div class="earned" id="winCoins"><span class="coin"></span><span id="winCoinsN">+50</span></div>
     <button class="btn green" id="winKeep" type="button">Seguir jugando</button>
     <button class="btn ghosty" id="winMenu" type="button">Menú principal</button>
   </div>
