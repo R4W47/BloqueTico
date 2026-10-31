@@ -25,6 +25,7 @@
     <div class="board" id="board"></div>
     <canvas class="sparks" id="sparks"></canvas>
     <div class="fx" id="fx"></div>
+    <div class="combo" id="comboMeter" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13.5 2s1 3.2-1.4 6.1C10.4 10.2 8 11.6 8 15a4 4 0 0 0 8 0c0-1.6-.7-2.7-1.3-3.6 2.3.6 4.3 2.9 4.3 5.6A7 7 0 0 1 5 17c0-5.3 4.4-7.4 6.4-10.2C12.6 5.1 13.5 2 13.5 2z"/></svg><span id="comboN">x2</span><span class="pips" id="comboPips"><i></i><i></i><i></i></span></div>
   </div>
   <div class="hint" id="hint"></div>
   <div class="powers" id="powers">
@@ -161,6 +162,7 @@
     <div class="earned" id="overCoins" hidden><span class="coin"></span><span id="overCoinsN">+0</span></div>
     <button class="btn primary" id="continueBtn" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg><span id="continueLabel">Ver anuncio y seguir</span></button>
     <button class="btn green" id="usePwBtn" type="button">Usar un power-up</button>
+    <button class="btn share" id="shareBtn" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 16a3 3 0 0 0-2.4 1.2l-6.7-3.4a3 3 0 0 0 0-1.6l6.7-3.4A3 3 0 1 0 15 7l-6.7 3.4a3 3 0 1 0 0 3.2L15 17a3 3 0 1 0 3-1z"/></svg>Compartir mi puntaje</button>
     <button class="btn ghosty" id="againBtn" type="button">Jugar de nuevo</button>
     <button class="btn ghosty" id="overMenuBtn" type="button">Menú principal</button>
     <p class="note">Prototipo: los anuncios son simulados. En la app real van anuncios con recompensa de AdMob.</p>
@@ -174,6 +176,7 @@
     <p id="winText">Llegaste a la meta de hoy.</p>
     <div class="earned" id="winCoins"><span class="coin"></span><span id="winCoinsN">+50</span></div>
     <button class="btn green" id="winKeep" type="button">Seguir jugando</button>
+    <button class="btn share" id="winShare" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 16a3 3 0 0 0-2.4 1.2l-6.7-3.4a3 3 0 0 0 0-1.6l6.7-3.4A3 3 0 1 0 15 7l-6.7 3.4a3 3 0 1 0 0 3.2L15 17a3 3 0 1 0 3-1z"/></svg>Compartir</button>
     <button class="btn ghosty" id="winMenu" type="button">Menú principal</button>
   </div>
 </div>

@@ -59,6 +59,24 @@
     set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} },
     del(k) { try { localStorage.removeItem(k); } catch (e) {} }
   };
+
+  /* ================= Puente con la app Android =================
+     En la app, MainActivity registra un objeto "AndroidBridge" (ver GameBridge.kt) con estos métodos:
+       logEvent(nombre, jsonParams)      → Firebase Analytics
+       showRewarded(lugar)               → AdMob con recompensa; responde llamando window.onRewardedResult(lugar, true|false)
+       showInterstitial()                → AdMob intersticial
+       requestReview()                   → reseña dentro de la app (Google Play)
+       shareImage(pngBase64, texto)      → compartir imagen (WhatsApp, etc.)
+     En el navegador no existe, así que todo se simula. */
+  const Bridge = window.AndroidBridge || null;
+  const Native = {
+    has: m => !!(Bridge && typeof Bridge[m] === 'function'),
+    log(name, params = {}) {
+      try { if (Native.has('logEvent')) Bridge.logEvent(name, JSON.stringify(params)); else console.debug('[analytics]', name, params); } catch (e) {}
+    }
+  };
+  // Enlace que va en la imagen compartida: cámbialo por el de tu ficha en Play Store
+  const SHARE_URL = 'https://play.google.com/store/apps/details?id=app.bloquetico.game';
   const settings = Object.assign({ sound: true, music: true, vibra: true }, store.get('bloquetico_settings', {}));
   let best = +store.get('bloquetico_best', 0) || 0;
   const STAT0 = { games: 0, lines: 0, pieces: 0, maxCombo: 0, maxMulti: 0, clean: 0, power: 0, stars: 0, ice: 0, daily: 0, bestStreak: 0 };
@@ -82,7 +100,7 @@
   const todayKey = () => keyOf(new Date());
   const dayNum = k => { const [y, m, d] = k.split('-').map(Number); return Math.round(Date.UTC(y, m - 1, d) / 864e5); };
   function hashStr(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
-  const dailyTarget = k => [800, 1000, 1200, 1500][hashStr('meta' + k) % 4];
+  const dailyTarget = k => [1000, 1300, 1600, 2000][hashStr('meta' + k) % 4];
   function seeded(seed) {
     let a = seed | 0;
     return () => { a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
@@ -94,6 +112,8 @@
   let rngState = 0, dailyKey = null, target = 0, goalHit = false, coinsGiven = 0;
   let level = 1, goal = null, piecesLeft = 0, advLines = 0, advStars = 0, iceHits = 0, usedMore = false;
   let placedCount = 0, recordShown = false, gameCounted = false, tutorial = false, targeting = null, overReason = 'stuck';
+  let comboMiss = 0, runMaxCombo = 0, runStart = Date.now(), booting = true;
+  const COMBO_GRACE = 3; // jugadas sin limpiar antes de perder el combo
 
   function rnd() {
     if (mode === 'classic') return Math.random();
@@ -200,6 +220,8 @@
       hammer() { if (!ok()) return; const t = ctx.currentTime; tone(120, t, .18, { type: 'square', vol: .12, slide: .5 }); noise(t, .12, .2, 900); },
       bomb() { if (!ok()) return; const t = ctx.currentTime; tone(90, t, .5, { type: 'sawtooth', vol: .18, slide: .3 }); noise(t, .5, .35, 400, sfx, 'lowpass'); },
       swap() { if (!ok()) return; const t = ctx.currentTime; tone(400, t, .12, { vol: .1, slide: 2 }); tone(800, t + .1, .12, { vol: .1, slide: .5 }); },
+      praise(level) { if (!ok()) return; const t = ctx.currentTime + .12; const top = Math.min(level, 6); for (let i = 0; i <= top + 1; i++) { tone(pnote(9 + i * 2), t + i * .045, .3, { type: 'triangle', vol: .09 }); } tone(pnote(10 + top * 2), t + (top + 2) * .045, .6, { vol: .07 }); },
+      comboLost() { if (!ok()) return; const t = ctx.currentTime + .05; tone(520, t, .25, { type: 'triangle', vol: .07, slide: .55 }); },
       mission() { if (!ok()) return; const t = ctx.currentTime; [7, 9, 12].forEach((n, i) => tone(pnote(n), t + i * .1, .35, { type: 'triangle', vol: .12 })); }
     };
   })();
@@ -260,14 +282,61 @@
     return false;
   }
   function newTray() {
-    for (let t = 0; t < 40; t++) { const tr = [makePiece(), makePiece(), makePiece()]; if (tr.some(canAnywhere)) return tr; }
+    // Al inicio de la partida las 3 piezas siempre caben; después casi siempre, para que perder se sienta justo
+    const early = placedCount < (mode === 'adv' ? 6 : 15);
+    const wantAll = early || rnd() < .65;
+    const helper = rnd() < (early ? .5 : .3) ? helperPiece() : null;
+    for (let t = 0; t < 30; t++) {
+      const tr = [makePiece(), makePiece(), makePiece()];
+      if (helper) tr[Math.floor(rnd() * 3)] = Object.assign({}, helper);
+      if (!tr.some(canAnywhere)) continue;
+      if (wantAll && t < 24 && !canPlaceAll(tr, board)) continue;
+      return tr;
+    }
     return [{ cells: [[0,0]], rows: 1, cols: 1, color: 2 }, makePiece(), makePiece()];
   }
   function clears(b) {
-    const set = new Set(); let lines = 0;
-    for (let r = 0; r < N; r++) { let full = true; for (let c = 0; c < N; c++) if (!b[r * N + c]) { full = false; break; } if (full) { lines++; for (let c = 0; c < N; c++) set.add(r * N + c); } }
-    for (let c = 0; c < N; c++) { let full = true; for (let r = 0; r < N; r++) if (!b[r * N + c]) { full = false; break; } if (full) { lines++; for (let r = 0; r < N; r++) set.add(r * N + c); } }
-    return { lines, set };
+    const set = new Set(), rows = [], cols = []; let lines = 0;
+    for (let r = 0; r < N; r++) { let full = true; for (let c = 0; c < N; c++) if (!b[r * N + c]) { full = false; break; } if (full) { lines++; rows.push(r); for (let c = 0; c < N; c++) set.add(r * N + c); } }
+    for (let c = 0; c < N; c++) { let full = true; for (let r = 0; r < N; r++) if (!b[r * N + c]) { full = false; break; } if (full) { lines++; cols.push(c); for (let r = 0; r < N; r++) set.add(r * N + c); } }
+    return { lines, set, rows, cols };
+  }
+
+  /* ---- Generador justo ----
+     canPlaceAll: ¿existe un orden para colocar las 3 piezas (limpiando líneas entre medio)?
+     Tiene un tope de trabajo para no trabar teléfonos baratos; si se pasa del tope, se acepta la bandeja. */
+  function canPlaceAll(ps, b0) {
+    let budget = 8000;
+    const go = (b, rest) => {
+      if (!rest.length) return true;
+      for (let k = 0; k < rest.length; k++) {
+        const p = rest[k], others = rest.filter((_, j) => j !== k);
+        for (let r = 0; r <= N - p.rows; r++) for (let c = 0; c <= N - p.cols; c++) {
+          if (--budget < 0) return true;
+          if (!fits(p, r, c, b)) continue;
+          const nb = b.slice();
+          for (const [dr, dc] of p.cells) nb[(r + dr) * N + c + dc] = 1;
+          clears(nb).set.forEach(i => { nb[i] = 0; });
+          if (go(nb, others)) return true;
+        }
+      }
+      return false;
+    };
+    return go(b0, ps);
+  }
+  // Busca una pieza que cabe y completa al menos una línea (las jugadas "satisfactorias" que enganchan)
+  function helperPiece() {
+    const order = SHAPES.map((s, i) => [rnd(), i]).sort((a, b) => a[0] - b[0]).map(x => SHAPES[x[1]]);
+    for (const s of order) {
+      const p = { cells: s.c, rows: s.rows, cols: s.cols };
+      for (let r = 0; r <= N - p.rows; r++) for (let c = 0; c <= N - p.cols; c++) {
+        if (!fits(p, r, c)) continue;
+        const tmp = board.slice();
+        for (const [dr, dc] of p.cells) tmp[(r + dr) * N + c + dc] = 1;
+        if (clears(tmp).lines) { p.color = 1 + Math.floor(rnd() * 7); return p; }
+      }
+    }
+    return null;
   }
 
   function renderBoard(pv) {
@@ -393,13 +462,49 @@
     const t = document.createElement('div'); t.className = 'toast'; t.textContent = msg;
     document.body.appendChild(t); setTimeout(() => t.remove(), 2300);
   }
+  /* ---- Efectos de combo ---- */
+  const PRAISE = [['¡Bien!', '#9bd94a'], ['¡Genial!', '#2ec4b6'], ['¡Excelente!', '#4aa8ff'], ['¡Increíble!', '#a07bff'], ['¡Imparable!', '#ff7ab6'], ['¡Legendario!', '#ffd166']];
+  function praise(word, color, mega) {
+    fxEl.querySelectorAll('.praise').forEach(x => x.remove());
+    const d = document.createElement('div'); d.className = 'praise' + (mega ? ' mega' : '');
+    d.textContent = word; d.style.setProperty('--pc', color);
+    fxEl.appendChild(d); setTimeout(() => d.remove(), 1200);
+  }
+  function flash() { const d = document.createElement('div'); d.className = 'flash'; fxEl.appendChild(d); setTimeout(() => d.remove(), 450); }
+  function beams(cl, color) {
+    const wr = fxEl.getBoundingClientRect();
+    const add = (a, b, v) => {
+      const ra = cells[a].getBoundingClientRect(), rb = cells[b].getBoundingClientRect();
+      const d = document.createElement('div'); d.className = 'beam' + (v ? ' v' : '');
+      d.style.cssText = `left:${ra.left - wr.left - 4}px;top:${ra.top - wr.top - 4}px;width:${rb.right - ra.left + 8}px;height:${rb.bottom - ra.top + 8}px;--bc:${color}`;
+      fxEl.appendChild(d); setTimeout(() => d.remove(), 600);
+    };
+    cl.rows.forEach(r => add(r * N, r * N + N - 1, false));
+    cl.cols.forEach(c => add(c, (N - 1) * N + c, true));
+  }
+  function updateCombo(bump) {
+    const m = $('comboMeter');
+    if (combo < 2) {
+      boardWrap.classList.remove('hot');
+      if (!m.hidden && !m.classList.contains('gone')) { m.classList.add('gone'); setTimeout(() => { if (combo < 2) m.hidden = true; m.classList.remove('gone'); }, 400); }
+      return;
+    }
+    m.hidden = false; m.classList.remove('gone');
+    $('comboN').textContent = 'x' + combo;
+    const left = COMBO_GRACE - comboMiss;
+    [...$('comboPips').children].forEach((p, i) => p.classList.toggle('off', i >= left));
+    m.classList.toggle('warn', left === 1);
+    const h = Math.min(6, combo - 1);
+    boardWrap.style.setProperty('--heat', h); m.style.setProperty('--heat', h); boardWrap.classList.add('hot');
+    if (bump) { m.classList.remove('bump'); void m.offsetWidth; m.classList.add('bump'); }
+  }
   function addCoins(n) { prog.coins += n; saveProg(); refreshCoins(); }
   function refreshCoins() { $('homeCoins').textContent = prog.coins; $('themeCoins').textContent = prog.coins; $('buyCoins').textContent = prog.coins; }
 
   const saveKey = () => mode === 'daily' ? 'bloquetico_daily' : mode === 'adv' ? 'bloquetico_adv' : 'bloquetico_save';
   function save() {
     if (over || tutorial) { if (over) store.del(saveKey()); return; }
-    store.set(saveKey(), { board, stars: [...stars], tray, score, combo, usedContinue, bestAtStart, rngState, dailyKey, goalHit, coinsGiven,
+    store.set(saveKey(), { board, stars: [...stars], tray, score, combo, comboMiss, runMaxCombo, usedContinue, bestAtStart, rngState, dailyKey, goalHit, coinsGiven,
       level, goal, piecesLeft, advLines, advStars, iceHits, usedMore, placedCount, recordShown, gameCounted });
   }
 
@@ -541,11 +646,15 @@
     renderBoard();
     placed.forEach(idx => { if (!cl.set.has(idx)) cells[idx].classList.add('land'); });
 
+    let comboLost = 0;
     if (cl.lines) {
-      combo++;
+      combo++; comboMiss = 0; runMaxCombo = Math.max(runMaxCombo, combo);
       gain += 10 * cl.lines * cl.lines * combo;
       const cy = r + p.rows / 2 - .5, cx = c + p.cols / 2 - .5;
+      const heat = (cl.lines - 1) + (combo - 1);
+      beams(cl, colorOf(p.color));
       let maxDelay = 0, starGot = 0, iceHit = 0;
+      const pc = 6 + Math.min(heat, 6) * 2;
       cl.set.forEach(idx => {
         const rr = Math.floor(idx / N), cc = idx % N, v = board[idx];
         const delay = Math.round((Math.abs(rr - cy) + Math.abs(cc - cx)) * 30);
@@ -556,7 +665,7 @@
         const color = colorOf(v);
         cells[idx].style.animationDelay = delay + 'ms';
         cells[idx].classList.add('pop');
-        setTimeout(() => burst(idx, color, stars.has(idx) ? 10 : 6), delay + 90);
+        setTimeout(() => burst(idx, color, stars.has(idx) ? pc + 4 : pc), delay + 90);
         board[idx] = 0;
       });
       setTimeout(() => { if (!drag) renderBoard(); }, maxDelay + 360);
@@ -570,22 +679,27 @@
       if (iceHit) setTimeout(() => Sound.ice(), 120);
 
       const cleanBoard = board.every(v => !v);
-      let sub = cl.lines > 1 ? `¡${cl.lines} líneas!` : '¡Línea!';
-      if (combo > 1) sub = `Combo x${combo}`;
+      let sub = cl.lines > 1 ? `${cl.lines} líneas` : '';
+      if (combo > 1) sub = `Combo x${combo}` + (cl.lines > 1 ? ` · ${cl.lines} líneas` : '');
       if (starGot) sub = `¡${starGot > 1 ? starGot + ' estrellas' : 'Estrella'}! +${starGot} moneda${starGot > 1 ? 's' : ''}`;
-      if (cleanBoard) { gain += 100; sub = '¡Tablero limpio!'; prog.stats.clean++; }
-      floatText(`+${gain}`, sub, combo > 1 || cl.lines > 1 || cleanBoard || starGot > 0);
-      Sound.place(); Sound.clear(cl.lines, combo); if (cleanBoard) Sound.clean();
-      if (cl.lines > 1 || cleanBoard) { boardWrap.classList.remove('shake'); void boardWrap.offsetWidth; boardWrap.classList.add('shake'); }
+      if (cleanBoard) { gain += 100; prog.stats.clean++; }
+      floatText(`+${gain}`, sub, heat > 0 || cleanBoard || starGot > 0);
+      if (cleanBoard) praise('¡Tablero limpio!', '#ffd166', true);
+      else if (heat > 0) { const [w, col] = PRAISE[Math.min(heat - 1, PRAISE.length - 1)]; praise(w, col, heat >= 4); }
+      Sound.place(); Sound.clear(cl.lines, combo); if (cleanBoard) Sound.clean(); else if (heat > 0) Sound.praise(heat);
+      if (heat >= 3 || cleanBoard) flash();
+      if (cl.lines > 1 || cleanBoard || combo >= 3) { boardWrap.classList.remove('shake'); void boardWrap.offsetWidth; boardWrap.classList.add('shake'); }
       // Vibración según la jugada
       if (cleanBoard) vib([60, 40, 60, 40, 150]);
-      else if (cl.lines >= 3) vib([40, 30, 40, 30, 80]);
-      else if (cl.lines === 2) vib([30, 40, 30]);
-      else vib(combo >= 3 ? [25, 30, 60] : 25);
+      else if (heat >= 3) vib([40, 30, 40, 30, 80]);
+      else if (heat >= 1) vib([30, 40, 30]);
+      else vib(25);
     } else {
-      combo = 0;
+      if (combo > 0 && ++comboMiss >= COMBO_GRACE) { comboLost = combo; combo = 0; comboMiss = 0; }
       Sound.place(); vib(10);
+      if (comboLost >= 2) Sound.comboLost();
     }
+    updateCombo(cl.lines > 0);
     addScore(gain);
     if (mode === 'adv') setChip();
 
@@ -597,9 +711,11 @@
     renderTray(dealt);
 
     if (tutorial) {
-      tutorial = false; prog.tutDone = true; saveProg();
+      tutorial = false; prog.tutDone = true; saveProg(); Native.log('tutorial_complete');
       hintEl.textContent = cl.lines ? '¡Eso es! Llena filas o columnas para limpiarlas. Los power-ups de abajo te ayudan si te trabas.' : 'Llena una fila o columna completa para limpiarla.';
-    } else hintEl.textContent = combo > 1 ? `Racha x${combo}: limpia otra línea con la próxima pieza para mantenerla.` : '';
+    } else if (comboLost >= 2) hintEl.textContent = `Se acabó tu combo x${comboLost}. ¡Arma otro!`;
+    else if (combo > 1) { const left = COMBO_GRACE - comboMiss; hintEl.textContent = `Combo x${combo}: limpia otra línea en ${left === 1 ? 'la próxima jugada' : left + ' jugadas'} para mantenerlo.`; }
+    else hintEl.textContent = '';
 
     afterMove();
     saveProg(); save();
@@ -613,7 +729,7 @@
     } else if (mode === 'daily' && !goalHit && score >= target) {
       goalHit = true;
       const first = !prog.daily[dailyKey];
-      if (first) { prog.daily[dailyKey] = true; trimDaily(); prog.stats.daily++; track('daily'); addCoins(DAILY_REWARD_COINS); }
+      if (first) { prog.daily[dailyKey] = true; trimDaily(); prog.stats.daily++; track('daily'); addCoins(DAILY_REWARD_COINS); Native.log('daily_complete', { score }); }
       updateGoal();
       if (stuck) over = true;
       setTimeout(() => showWin(first, stuck), 650);
@@ -647,7 +763,7 @@
     targeting = null; boardWrap.classList.remove('targeting'); renderPowers();
   }
   function usedPower(k) {
-    prog.items[k]--; prog.stats.power++; track('power'); saveProg();
+    prog.items[k]--; prog.stats.power++; track('power'); saveProg(); Native.log('power_used', { type: k, mode });
     renderPowers();
   }
   document.querySelectorAll('.pw').forEach(b => b.addEventListener('click', () => {
@@ -723,7 +839,7 @@
     const P = POWERS[buying]; if (prog.coins < P.price) { Sound.bad(); return; }
     prog.coins -= P.price; giveItem(buying, 1); refreshCoins(); Sound.coins(); toast(`+1 ${P.name}`); show('buy', false);
   });
-  $('buyAd').addEventListener('click', () => { const k = buying; playAd(`Tu recompensa: 1 ${POWERS[k].name}`, () => { giveItem(k, 1); Sound.reward(); toast(`+1 ${POWERS[k].name}`); show('buy', false); }); });
+  $('buyAd').addEventListener('click', () => { const k = buying; playAd(`Tu recompensa: 1 ${POWERS[k].name}`, () => { giveItem(k, 1); Sound.reward(); toast(`+1 ${POWERS[k].name}`); show('buy', false); }, 'power_' + k); });
   $('buyClose').addEventListener('click', () => { Sound.tap(); show('buy', false); });
 
   /* ================= Arrastre ================= */
@@ -817,21 +933,105 @@
   }
 
   /* ================= Anuncio simulado ================= */
-  let adBusy = false;
-  function playAd(msg, done) {
+  let adBusy = false, pendingAd = null, nativeAdOpen = false;
+  let lastAdAt = Date.now(), gamesSinceAd = 0; // el primer intersticial nunca sale antes de 3 minutos de sesión
+  const AD_GAP_MS = 180000, GAMES_PER_INTERSTITIAL = 3;
+  // placement: nombre del lugar del anuncio, para saber en Firebase cuáles se ven más
+  function playAd(msg, done, placement = 'reward', fail) {
     if (adBusy) return; adBusy = true;
+    Native.log('ad_rewarded_request', { placement });
+    Sound.setMusic(false);
+    const finish = granted => {
+      adBusy = false; lastAdAt = Date.now();
+      if (settings.music) Sound.setMusic(true);
+      if (granted) { Native.log('ad_rewarded_complete', { placement }); done(); }
+      else { toast('No hay anuncio disponible ahora. Intenta en un momento.'); if (fail) fail(); }
+    };
+    if (Native.has('showRewarded')) { pendingAd = finish; try { Bridge.showRewarded(placement); } catch (e) { pendingAd = null; finish(false); } return; }
     $('adMsg').textContent = msg; show('adLayer', true);
     let n = 5; $('adCount').textContent = n;
-    Sound.setMusic(false);
     const t = setInterval(() => {
       n--; $('adCount').textContent = Math.max(n, 0);
       if (n > 0) return;
-      clearInterval(t); adBusy = false;
-      show('adLayer', false);
-      if (settings.music) Sound.setMusic(true);
-      done();
+      clearInterval(t); show('adLayer', false); finish(true);
     }, 1000);
   }
+  window.onRewardedResult = (placement, granted) => { const f = pendingAd; pendingAd = null; if (f) f(!!granted); };
+  window.onInterstitialClosed = () => { nativeAdOpen = false; };
+  // Intersticial: cada 3 partidas y nunca a menos de 3 minutos de otro anuncio (incluidos los de recompensa)
+  function maybeInterstitial() {
+    if (prog.adFree) return;
+    gamesSinceAd++;
+    if (gamesSinceAd < GAMES_PER_INTERSTITIAL || Date.now() - lastAdAt < AD_GAP_MS) return;
+    gamesSinceAd = 0; lastAdAt = Date.now();
+    Native.log('ad_interstitial');
+    if (Native.has('showInterstitial')) { try { nativeAdOpen = true; Bridge.showInterstitial(); } catch (e) { nativeAdOpen = false; } }
+    else toast('Aquí saldría un anuncio intersticial (simulado)');
+  }
+  // La app llama window.setAdFree(true) cuando el jugador compra "Quitar anuncios"
+  window.setAdFree = v => { prog.adFree = !!v; saveProg(); };
+  // Pedir reseña una sola vez, en un buen momento (después de un récord o de avanzar en aventura)
+  function maybeReview() {
+    if (prog.reviewAsked || prog.stats.games < 5) return;
+    prog.reviewAsked = true; saveProg();
+    Native.log('review_prompt');
+    if (Native.has('requestReview')) setTimeout(() => { try { Bridge.requestReview(); } catch (e) {} }, 1200);
+  }
+
+  /* ================= Compartir puntaje ================= */
+  async function makeShareImage() {
+    try { await document.fonts.load('700 80px Fredoka'); } catch (e) {}
+    const W = 1080, H = 1350, F = 'Fredoka, "Trebuchet MS", sans-serif';
+    const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+    const g = cv.getContext('2d');
+    const rr = (x, y, w, h, r) => { g.beginPath(); if (g.roundRect) g.roundRect(x, y, w, h, r); else g.rect(x, y, w, h); g.fill(); };
+    const bg = g.createLinearGradient(0, 0, 0, H); bg.addColorStop(0, '#1b4767'); bg.addColorStop(1, '#0b1d29');
+    g.fillStyle = bg; g.fillRect(0, 0, W, H);
+    g.textAlign = 'center'; g.textBaseline = 'alphabetic';
+    g.font = `700 76px ${F}`; g.textAlign = 'left';
+    const w1 = g.measureText('Bloque').width, w2 = g.measureText('Tico').width, x0 = (W - w1 - w2) / 2;
+    g.fillStyle = '#f6f0e1'; g.fillText('Bloque', x0, 130);
+    g.fillStyle = '#ffb547'; g.fillText('Tico', x0 + w1, 130);
+    g.textAlign = 'center';
+    const rec = mode === 'classic' && bestAtStart > 0 && score > bestAtStart;
+    const head = mode === 'daily' ? 'Reto diario' : mode === 'adv' ? `Aventura · Nivel ${level}` : rec ? '¡Nuevo récord!' : 'Mi puntaje';
+    g.fillStyle = rec ? '#ffd166' : '#9db8c6'; g.font = `600 48px ${F}`; g.fillText(head, W / 2, 215);
+    g.fillStyle = '#ffb547'; g.font = `700 190px ${F}`;
+    g.shadowColor = 'rgba(0,0,0,.35)'; g.shadowOffsetY = 8; g.fillText(score.toLocaleString('es'), W / 2, 400); g.shadowColor = 'transparent';
+    const BS = 600, bx = (W - BS) / 2, by = 450, gap = 8, cs = (BS - 32 - gap * 7) / 8;
+    g.fillStyle = '#16394f'; rr(bx, by, BS, BS, 28);
+    for (let i = 0; i < N * N; i++) {
+      const x = bx + 16 + (i % N) * (cs + gap), y = by + 16 + Math.floor(i / N) * (cs + gap), v = board[i];
+      g.fillStyle = v ? colorOf(v) : '#1d4760'; rr(x, y, cs, cs, 10);
+      if (v) { g.fillStyle = 'rgba(255,255,255,.25)'; rr(x + 6, y + 5, cs - 12, 9, 4); g.fillStyle = 'rgba(0,0,0,.18)'; rr(x, y + cs - 9, cs, 9, 4); }
+    }
+    g.fillStyle = '#f6f0e1'; g.font = `700 68px ${F}`; g.fillText('¿Me ganas?', W / 2, 1170);
+    g.fillStyle = '#9bd94a'; g.font = `600 42px ${F}`; g.fillText('Juega gratis en Google Play', W / 2, 1245);
+    return cv;
+  }
+  async function shareScore() {
+    Sound.init(); Sound.tap();
+    const cv = await makeShareImage();
+    const text = `¡Hice ${score} puntos en Bloque Tico! ¿Me ganas? ${SHARE_URL}`;
+    const dataUrl = cv.toDataURL('image/png');
+    Native.log('share', { mode, score });
+    if (Native.has('shareImage')) { try { Bridge.shareImage(dataUrl.split(',')[1], text); return; } catch (e) {} }
+    try {
+      const blob = await new Promise(r => cv.toBlob(r, 'image/png'));
+      const file = new File([blob], 'bloque-tico.png', { type: 'image/png' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], text }); return; }
+    } catch (e) { if (e && e.name === 'AbortError') return; }
+    // Sin forma de compartir (por ejemplo, en la vista previa): se muestra la imagen para verla o guardarla
+    const ov = document.createElement('div'); ov.className = 'overlay';
+    ov.innerHTML = `<div class="panel"><h2>Tu imagen para compartir</h2><img alt="Imagen con tu puntaje" style="width:100%; border-radius:12px">
+      <p class="note">En la app se abre directamente el menú para mandarla por WhatsApp. Aquí puedes mantenerla presionada para guardarla.</p>
+      <button class="btn ghosty" type="button">Cerrar</button></div>`;
+    ov.querySelector('img').src = dataUrl;
+    ov.querySelector('button').addEventListener('click', () => { Sound.tap(); ov.remove(); });
+    document.body.appendChild(ov);
+  }
+  $('shareBtn').addEventListener('click', shareScore);
+  $('winShare').addEventListener('click', shareScore);
 
   /* ================= Ajustes ================= */
   function syncToggles() {
@@ -875,9 +1075,9 @@
     return { board: b, goal: g, pieces };
   }
   function resetRun() {
-    over = false; combo = 0; usedContinue = false; goalHit = false; coinsGiven = 0; usedMore = false;
+    over = false; combo = 0; comboMiss = 0; runMaxCombo = 0; runStart = Date.now(); usedContinue = false; goalHit = false; coinsGiven = 0; usedMore = false;
     placedCount = 0; recordShown = false; gameCounted = false; advLines = 0; advStars = 0; stars = new Set(); tutorial = false;
-    cancelTargeting(); hideHand();
+    cancelTargeting(); hideHand(); updateCombo();
   }
   function newGame(m = mode) {
     mode = m; resetRun();
@@ -900,6 +1100,7 @@
     if (!tutorial) hintEl.textContent = mode === 'daily' ? `Reto de hoy: llega a ${target} puntos. Todos juegan el mismo tablero.`
       : mode === 'adv' ? `Nivel ${level}: ${goalText(goal)} con ${piecesLeft} piezas.` : '';
     renderBoard(); renderTray(true); renderPowers();
+    if (!booting) Native.log('game_start', { mode, level: mode === 'adv' ? level : 0 });
     save();
   }
   function loadGame(m) {
@@ -909,14 +1110,15 @@
       && (m !== 'daily' || s.dailyKey === todayKey()) && (m !== 'adv' || s.level === level);
     if (!valid) { newGame(m); return; }
     resetRun();
-    board = s.board; tray = s.tray; stars = new Set(s.stars || []); combo = s.combo || 0; usedContinue = !!s.usedContinue;
+    board = s.board; tray = s.tray; stars = new Set(s.stars || []); combo = s.combo || 0; comboMiss = s.comboMiss || 0; runMaxCombo = s.runMaxCombo || 0; runStart = Date.now(); usedContinue = !!s.usedContinue;
     bestAtStart = s.bestAtStart ?? best; rngState = s.rngState | 0; goalHit = !!s.goalHit; coinsGiven = s.coinsGiven || 0;
     goal = s.goal; piecesLeft = s.piecesLeft || 0; advLines = s.advLines || 0; advStars = s.advStars || 0; iceHits = s.iceHits || 0; usedMore = !!s.usedMore;
     placedCount = s.placedCount || 0; recordShown = !!s.recordShown; gameCounted = !!s.gameCounted;
     if (m === 'daily') { dailyKey = s.dailyKey; target = dailyTarget(dailyKey); }
     setModeLabel(); setScoreNow(s.score || 0);
     hintEl.textContent = '';
-    renderBoard(); renderTray(); renderPowers();
+    renderBoard(); renderTray(); renderPowers(); updateCombo();
+    if (!booting) Native.log('game_resume', { mode: m });
     if (!tray.some(x => x && canAnywhere(x))) newGame(m);
   }
   function hasSave(k) {
@@ -984,6 +1186,8 @@
     const reward = first ? Math.min(80, 15 + level * 2) : 0;
     if (first) { prog.adv = level + 1; addCoins(reward); }
     track('adv'); endGameStats(); payCoins();
+    Native.log('level_complete', { level, pieces_left: piecesLeft, first: first ? 1 : 0 });
+    if (first && (level === 5 || level === 12)) maybeReview();
     store.del('bloquetico_adv');
     $('winTitle').textContent = `¡Nivel ${level} superado!`;
     $('winText').textContent = `${goalText(goal)} · te sobraron ${piecesLeft} piezas.`;
@@ -1028,7 +1232,7 @@
     updateBadges();
   }
   $('claimBtn').addEventListener('click', () => { Sound.init(); claim(1); });
-  $('claimAdBtn').addEventListener('click', () => { Sound.init(); playAd(`Tu recompensa: ${pendingReward * 2} monedas`, () => claim(2)); });
+  $('claimAdBtn').addEventListener('click', () => { Sound.init(); playAd(`Tu recompensa: ${pendingReward * 2} monedas`, () => claim(2), 'daily_double'); });
 
   /* ---- Estilos: bloques y tablero ---- */
   let shopTab = 'blocks';
@@ -1067,7 +1271,7 @@
     const owned = isB ? prog.owned : prog.ownedBoards;
     if (!owned.includes(t.id)) {
       if (prog.coins < t.price) { Sound.bad(); toast(`Te faltan ${t.price - prog.coins} monedas`); return; }
-      prog.coins -= t.price; owned.push(t.id); Sound.coins(); vib(20); toast(`¡Desbloqueaste ${t.name}!`);
+      prog.coins -= t.price; owned.push(t.id); Native.log('theme_unlock', { id: t.id, price: t.price }); Sound.coins(); vib(20); toast(`¡Desbloqueaste ${t.name}!`);
     } else Sound.tap();
     if (isB) prog.theme = t.id; else prog.board = t.id;
     saveProg(); applyTheme(); renderThemes();
@@ -1076,7 +1280,7 @@
   $('tabBoards').addEventListener('click', () => { Sound.tap(); shopTab = 'boards'; renderThemes(); });
   $('themesBtn').addEventListener('click', () => { Sound.init(); Sound.tap(); renderThemes(); show('themes', true); });
   $('themesClose').addEventListener('click', () => { Sound.tap(); show('themes', false); refreshCoins(); });
-  $('coinAdBtn').addEventListener('click', () => { Sound.init(); playAd('Tu recompensa: 25 monedas', () => { addCoins(25); Sound.coins(); renderThemes(); toast('+25 monedas'); }); });
+  $('coinAdBtn').addEventListener('click', () => { Sound.init(); playAd('Tu recompensa: 25 monedas', () => { addCoins(25); Sound.coins(); renderThemes(); toast('+25 monedas'); }, 'shop_coins'); });
 
   /* ---- Pausa ---- */
   $('pauseBtn').addEventListener('click', () => { Sound.tap(); disarm(); cancelTargeting(); show('pause', true); });
@@ -1101,6 +1305,7 @@
   function endGameStats() {
     if (gameCounted) return;
     gameCounted = true; prog.stats.games++; track('games'); track('score', score); saveProg();
+    Native.log('game_end', { mode, score, level: mode === 'adv' ? level : 0, pieces: placedCount, max_combo: runMaxCombo, used_continue: usedContinue ? 1 : 0, seconds: Math.round((Date.now() - runStart) / 1000) });
   }
   function showOver() {
     Sound.over(); vib(120); hideHand();
@@ -1128,11 +1333,16 @@
       $('againBtn').textContent = 'Jugar de nuevo'; $('overMenuBtn').textContent = 'Menú principal';
     }
     $('usePwBtn').hidden = !(overReason === 'stuck' && Object.values(prog.items).some(n => n > 0));
+    const isRec = mode === 'classic' && bestAtStart > 0 && score > bestAtStart;
+    $('shareBtn').hidden = score <= 0;
+    $('shareBtn').classList.toggle('pulse', isRec);
+    if (isRec) maybeReview();
+    if (mode === 'adv') Native.log('level_fail', { level, reason: overReason });
     $('overCoins').hidden = earned <= 0; $('overCoinsN').textContent = `+${earned}`;
     save();
     show('over', true);
   }
-  function finishRun() { endGameStats(); payCoins(); store.del(saveKey()); }
+  function finishRun() { endGameStats(); payCoins(); store.del(saveKey()); maybeInterstitial(); }
   $('againBtn').addEventListener('click', () => { Sound.tap(); show('over', false); finishRun(); newGame(); });
   $('overMenuBtn').addEventListener('click', () => { Sound.tap(); show('over', false); finishRun(); goMenu(); });
   $('usePwBtn').addEventListener('click', () => {
@@ -1147,17 +1357,17 @@
         floatText('+5 piezas', 'Recompensa', true); Sound.reward();
         if (!tray.some(x => x && canAnywhere(x))) { over = true; overReason = 'stuck'; setTimeout(showOver, 600); }
         save();
-      });
+      }, 'more_pieces', () => show('over', true));
       return;
     }
     playAd('Tu recompensa: despejamos el centro del tablero', () => {
       for (let r = 2; r < 6; r++) for (let c = 2; c < 6; c++) { const i = r * N + c; board[i] = 0; stars.delete(i); }
-      usedContinue = true; over = false; combo = 0;
+      usedContinue = true; over = false; combo = 0; comboMiss = 0; updateCombo();
       tray = newTray();
       renderBoard(); renderTray(true); updateGoal();
       floatText('¡Sigue jugando!', 'Recompensa', true); Sound.reward();
       save();
-    });
+    }, 'continue', () => show('over', true));
   });
 
   /* ---- Reto cumplido ---- */
@@ -1172,7 +1382,7 @@
   }
   $('winKeep').addEventListener('click', () => {
     Sound.tap(); show('win', false);
-    if (mode === 'adv') { level = prog.adv > level ? level + 1 : level; newGame('adv'); }
+    if (mode === 'adv') { level = prog.adv > level ? level + 1 : level; maybeInterstitial(); newGame('adv'); }
   });
   $('winMenu').addEventListener('click', () => {
     Sound.tap(); show('win', false);
@@ -1209,15 +1419,23 @@
   };
   window.onAppPause = () => {
     if (drag) onCancel(); if (!over) save(); saveProg(); Sound.suspend();
-    if ($('home').hidden && $('over').hidden && $('adLayer').hidden && $('win').hidden) { disarm(); cancelTargeting(); show('pause', true); }
+    // Mientras se ve un anuncio nativo la app también pasa a segundo plano: ahí no se muestra la pausa
+    if (!adBusy && !nativeAdOpen && $('home').hidden && $('over').hidden && $('adLayer').hidden && $('win').hidden) { disarm(); cancelTargeting(); show('pause', true); }
   };
   window.onAppResume = () => Sound.resume();
+
+  // Solo para pruebas automáticas (abrir con ?debug)
+  if (/[?&]debug/.test(location.search)) window.__bt = {
+    get board() { return board; }, get tray() { return tray; }, get score() { return score; }, get combo() { return combo; }, get over() { return over; },
+    fits, clears, newTray, canPlaceAll, place: (i, r, c) => place(i, tray[i], r, c), newGame, shareImage: makeShareImage, showOver
+  };
 
   function start() {
     syncToggles(); applyTheme(); ensureMissions();
     loadGame('classic');
     sizeCanvas();
     showHome();
+    booting = false;
   }
   start();
 })();
